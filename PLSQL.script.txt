@@ -1,0 +1,166 @@
+Connexion: orcl1 
+Nom: elfai4u
+
+
+
+
+
+SET SERVEROUTPUT ON
+--suppression des tables
+DROP TABLE Salle CASCADE CONSTRAINTS;
+DROP TABLE UE CASCADE CONSTRAINTS;
+DROP TABLE Groupes CASCADE CONSTRAINTS;
+DROP TABLE Reservation CASCADE CONSTRAINTS;
+--suppression des tables et procedure
+DROP PROCEDURE MAJGROUPE;
+DROP PROCEDURE ReservationsGroupe;
+DROP FUNCTION estLibre;
+
+
+
+
+--creation de la table salle
+CREATE TABLE Salle(
+    NoSalle VARCHAR2(7) PRIMARY KEY,
+    Categorie VARCHAR2(20) CHECK (Categorie IN ('Salle', 'Amphi', 'Salle TP')),
+    NbPlaces NUMBER(3) CHECK (NbPlaces > 0)
+);
+--creation de la table ue
+CREATE TABLE UE(
+    CodeUE CHAR(8) PRIMARY KEY,
+    NomUE VARCHAR2(20) NOT NULL,
+    Formation VARCHAR2(20) NOT NULL,
+    Hc NUMBER(5,2) DEFAULT 0 CHECK(Hc >= 0),
+    HTd NUMBER(5,2) DEFAULT 0 CHECK(HTd >= 0),
+    HTp NUMBER(5,2) DEFAULT 0 CHECK(HTp >= 0), 
+    HCRes NUMBER(5,2) DEFAULT 0 CHECK(HCRes >= 0),
+    HTDRes NUMBER(5,2) DEFAULT 0 CHECK(HTDRes >= 0),
+    HTPRes NUMBER(5,2) DEFAULT 0 CHECK(HTPRes >= 0)
+
+);
+--creation de la table groupe
+CREATE TABLE Groupes(
+    Groupe VARCHAR2(5),
+    Formation VARCHAR2(20),
+    Effectif NUMBER(4),
+    PRIMARY KEY(Groupe, Formation)
+);
+--creation de la table reservation
+CREATE TABLE Reservation (
+    NoReservation NUMBER(10) PRIMARY KEY,
+    NoSalle  VARCHAR2(7) REFERENCES Salle(NoSalle),
+    CodeUE CHAR(8) REFERENCES UE(CodeUE) ,
+    Groupe VARCHAR2(20),
+    Formation VARCHAR2(20),
+    Nature VARCHAR2(10) CHECK (Nature IN ('Cours', 'TD', 'M1I', 'TP')),
+    Debut DATE NOT NULL,
+    Duree NUMBER(4) CHECK ((Duree >= 0)),
+    FOREIGN KEY (Groupe, Formation) REFERENCES Groupes(Groupe, Formation)
+);
+--on insere les valeurs
+INSERT INTO Salle(NoSalle,Categorie,NbPlaces) VALUES('S1','Salle TP',20);
+INSERT INTO UE(CodeUE,nomUE,Formation,HC,HTD,HTP) VALUES('BD2','Bases de Donnï¿½es 2','L3I',8,10,12);
+INSERT INTO Groupes(Groupe, Formation, Effectif) VALUES('CM','L3I',60);
+INSERT INTO Groupes(Groupe, Formation, Effectif) VALUES('TP1','L3I',50);
+INSERT INTO Groupes(Groupe, Formation, Effectif) VALUES('TP2','L3I',50);
+INSERT INTO Reservation(NoReservation,NoSalle,CodeUE,Groupe,Formation,Nature,Debut,Duree) VALUES(1,'S1','BD2','TP1','L3I','TP',TO_DATE('12/12/2022 0830','DD/MM/YYYY HH24:MI'),120);
+INSERT INTO Reservation(NoReservation,NoSalle,CodeUE,Groupe,Formation,Nature,Debut,Duree) VALUES(2,'S1','BD2','TP2','L3I','TP',TO_DATE('12/12/2022 1030','DD/MM/YYYY HH24:MI'),120);
+
+
+
+
+--creation de la procedure majgroupe
+CREATE OR REPLACE PROCEDURE MajGroupe(Gpe IN VARCHAR2, Format IN VARCHAR2, Eff IN NUMBER)
+IS 
+nbr_Gpe NUMBER;
+BEGIN 
+    --on compte le nombre de groupe, et sil il est  = 0, on insere un groupe
+    SELECT COUNT(*) INTO nbr_Gpe From Groupes G WHERE  Gpe = G.Groupe AND Format = G.Formation;  
+    IF (nbr_Gpe = 0 AND Eff > 0) THEN 
+        INSERT INTO Groupes(Groupe, Formation, Effectif) VALUES (Gpe, Format, Eff);
+         DBMS_OUTPUT.PUT_LINE('Le Groupe ' || Gpe || 'existant pas a ete ajouter ');
+    ELSE IF (nbr_Gpe > 0 AND Eff > 0) THEN 
+        
+        UPDATE Groupes G SET Effectif = Eff WHERE G.Formation = Format AND G.Groupe = Gpe;
+        DBMS_OUTPUT.PUT_LINE('Le Groupe ' || Gpe || 'existant a ete modifier ');
+    ELSE 
+        --supression des tables 
+        DELETE FROM Reservation R WHERE R.Formation = Format AND R.Groupe = Gpe ;
+        DELETE FROM Groupes G WHERE G.Formation = Format AND G.Groupe = Gpe ;
+         DBMS_OUTPUT.PUT_LINE('effectif inferieur à 0');
+    END IF; 
+    IF (Eff <=0 AND nbr_Gpe = 0 ) THEN 
+        DBMS_OUTPUT.PUT_LINE(' Le groupe inexistant ');
+        ROLLBACK;
+    ELSE
+        COMMIT;
+    END IF;
+END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Code Oracle : ' || SQLCODE || ' Message erreur: ' || SQLERRM);
+END;
+/
+--creation de la procedure Reservationgroupe
+CREATE OR REPLACE PROCEDURE ReservationsGroupe (Gpe IN VARCHAR2, Forma IN VARCHAR2)
+AS
+   CURSOR Liste_c IS
+      SELECT R.Debut, TO_CHAR(R.Debut + (R.Duree / 1440), 'DD MONTH YYYY HH24:MI') AS Fin, R.CodeUE, R.NoSalle, R.Groupe,UE.NomUE, R.Nature FROM Reservation R
+      JOIN UE ON UE.CodeUE = R.CodeUE
+      WHERE R.Groupe = Gpe AND 
+      R.Formation = Forma;
+
+   reservations_t BOOLEAN := FALSE;
+BEGIN
+   FOR resultat IN Liste_c LOOP
+      reservations_t := TRUE;
+
+   
+      DBMS_OUTPUT.PUT_LINE('Début: ' || TO_CHAR(resultat.Debut, 'DD MONTH YYYY HH24:MI') || ', 
+                            Fin: ' || resultat.Fin || '
+                            Code UE: ' || 
+                            resultat.CodeUE || ', 
+                            Nom UE: ' || 
+                            resultat.NomUE || '
+                            Nature: ' || 
+                            resultat.Nature || ', 
+                            No. salle: ' || 
+                            resultat.NoSalle || ', 
+                            Groupe: ' || resultat.Groupe);
+   END LOOP;
+
+   
+   IF NOT reservations_t THEN
+      IF Gpe IS NULL THEN
+         DBMS_OUTPUT.PUT_LINE('0 reservation ');
+      ELSE
+         DBMS_OUTPUT.PUT_LINE('0 reservation pour le groupe ou formation');
+      END IF;
+   END IF;
+END;
+/
+--creation de la fonction estlibre
+CREATE OR REPLACE FUNCTION EstLibre(Gpe VARCHAR2, Forma VARCHAR2, n_debut DATE, n_duree NUMBER) RETURN boolean
+IS
+    nbr_reserv NUMBER(10);
+    nbr_gpe NUMBER(10);
+BEGIN
+    --on compte et selectionne le nombre de groupe, s'il egal a 0 il n'y a pas de groupe 
+    SELECT COUNT(*) INTO nbr_gpe FROM Groupes WHERE Groupe = Gpe AND Formation = Forma;
+    IF(nbr_gpe = 0) THEN
+        DBMS_OUTPUT.PUT_LINE('Le groupe ' || Gpe || ' inexistant');
+        RETURN FALSE;
+    END IF;
+    
+    SELECT COUNT(*) INTO nbr_reserv FROM Reservation WHERE Groupe = Gpe AND Formation = Forma AND n_debut = debut AND n_duree = duree;
+    IF(nbr_reserv = 0) THEN
+        RETURN TRUE;
+    ELSE
+        RETURN FALSE;
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Code Oracle : ' || SQLCODE || ' Message erreur: ' || SQLERRM);
+        RETURN FALSE;
+END;
+/
